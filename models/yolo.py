@@ -94,6 +94,16 @@ class Detect(nn.Module):
         return (box, score)
 
 
+class NormalizedLinear(nn.Module):
+    def __init__(self, in_features, out_features):
+        super(NormalizedLinear, self).__init__()
+        self._weight = nn.Linear(in_features, out_features, bias=False).weight
+
+    def forward(self, x):
+        normalized_weight = F.normalize(self._weight, dim=1)
+        return F.linear(F.normalize(x, dim=1), normalized_weight)
+
+
 class DescriptorDetect(nn.Module):
     stride = None  # strides computed during build
     export = False  # onnx export
@@ -114,7 +124,7 @@ class DescriptorDetect(nn.Module):
         self.register_buffer('anchors', a)  # shape(nl,na,2)
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.noe * self.na, 1) for x in ch)  # output conv
-        self.classifier = nn.Linear(self.embedding_size, self.nc, bias=False)
+        self.classifier = NormalizedLinear(self.embedding_size, self.nc)
 
     def forward(self, x):
         # x = x.copy()  # for profiling
@@ -308,7 +318,7 @@ class IDescriptorDetect(nn.Module):
         self.register_buffer('anchors', a)  # shape(nl,na,2)
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.noe * self.na, 1) for x in ch)  # output conv
-        self.classifier = nn.Linear(self.embedding_size, self.nc, bias=False)
+        self.classifier = NormalizedLinear(self.embedding_size, self.nc)
 
         self.ia = nn.ModuleList(ImplicitA(x) for x in ch)
         self.im = nn.ModuleList(ImplicitM(self.noe * self.na) for _ in ch)

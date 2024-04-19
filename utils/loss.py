@@ -8,6 +8,37 @@ from utils.general import bbox_iou, bbox_alpha_iou, box_iou, box_giou, box_diou,
 from utils.torch_utils import is_parallel
 
 
+class AmSoftmaxLoss(nn.Module):
+    def __init__(self, s=10.0, m=0.2, end_annealing_steps=300000):
+        super(AmSoftmaxLoss, self).__init__()
+        self._s = s
+        self._m = 0.0
+        self._target_m = m
+
+        self._steps = -1
+        self._end_annealing_steps = end_annealing_steps
+        self._next_step()
+
+    def forward(self, scores, target):
+        target = torch.argmax(target, dim=1)
+        scores = scores.clone()
+
+        numerator = self._s * (scores[range(scores.size(0)), target] - self._m)
+        scores[range(scores.size(0)), target] = -float('inf')
+        denominator = torch.exp(numerator) + torch.sum(torch.exp(self._s * scores), dim=1)
+        loss = numerator - torch.log(denominator)
+
+        self._next_step()
+        return -loss.mean()
+
+    def _next_step(self):
+        self._steps += 1
+        if self._steps >= self._end_annealing_steps:
+            self._m = self._target_m
+        else:
+            self._m = self._target_m * self._steps / self._end_annealing_steps
+
+
 def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441
     # return positive, negative label smoothing BCE targets
     return 1.0 - 0.5 * eps, 0.5 * eps
@@ -438,9 +469,9 @@ class ComputeLoss:
         if g > 0:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
-        # CE instead of BCE for the classes
-        if h['softmax_cls']:
-            BCEcls = nn.CrossEntropyLoss(label_smoothing=h.get('label_smoothing', 0.0))
+        # AM Softmax instead of BCE for the classes
+        if h['am_softmax_cls']:
+            BCEcls = AmSoftmaxLoss(m=h['am_softmax_m'], s=h['am_softmax_s'])
             self.cp = 1.0
             self.cn = 0.0
 
@@ -578,9 +609,9 @@ class ComputeLossOTA:
         if g > 0:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
-        # CE instead of BCE for the classes
-        if h['softmax_cls']:
-            BCEcls = nn.CrossEntropyLoss(label_smoothing=h.get('label_smoothing', 0.0))
+        # AM Softmax instead of BCE for the classes
+        if h['am_softmax_cls']:
+            BCEcls = AmSoftmaxLoss(m=h['am_softmax_m'], s=h['am_softmax_s'])
             self.cp = 1.0
             self.cn = 0.0
 
